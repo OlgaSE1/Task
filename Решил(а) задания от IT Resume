@@ -1,0 +1,128 @@
+--Задание 1
+
+WITH cohorts AS (
+    SELECT 
+        u.id AS user_id,
+        DATE_TRUNC('month', u.date_joined) AS cohort_month
+    FROM users u
+),
+user_entries AS (
+    SELECT 
+        ue.user_id,
+        c.cohort_month,
+        EXTRACT(DAY FROM (ue.entry_at - c.cohort_month))::int AS day_number
+    FROM userentry ue
+    JOIN cohorts c ON ue.user_id = c.user_id
+    WHERE ue.entry_at >= c.cohort_month
+),
+cohort_retention AS (
+    SELECT 
+        cohort_month,
+        user_id,
+        MAX(day_number) AS last_active_day
+    FROM user_entries
+    GROUP BY cohort_month, user_id
+)
+SELECT 
+    cohort_month AS "Когорта",
+    COUNT(user_id) AS "Всего пользователей",
+    ROUND(100.0 * COUNT(CASE WHEN last_active_day >= 0 THEN 1 END) / COUNT(user_id), 2) AS "D0, %",
+    ROUND(100.0 * COUNT(CASE WHEN last_active_day >= 1 THEN 1 END) / COUNT(user_id), 2) AS "D1, %",
+    ROUND(100.0 * COUNT(CASE WHEN last_active_day >= 3 THEN 1 END) / COUNT(user_id), 2) AS "D3, %",
+    ROUND(100.0 * COUNT(CASE WHEN last_active_day >= 7 THEN 1 END) / COUNT(user_id), 2) AS "D7, %",
+    ROUND(100.0 * COUNT(CASE WHEN last_active_day >= 14 THEN 1 END) / COUNT(user_id), 2) AS "D14, %",
+    ROUND(100.0 * COUNT(CASE WHEN last_active_day >= 30 THEN 1 END) / COUNT(user_id), 2) AS "D30, %",
+    ROUND(100.0 * COUNT(CASE WHEN last_active_day >= 60 THEN 1 END) / COUNT(user_id), 2) AS "D60, %",
+    ROUND(100.0 * COUNT(CASE WHEN last_active_day >= 90 THEN 1 END) / COUNT(user_id), 2) AS "D90, %"
+FROM cohort_retention
+GROUP BY cohort_month
+ORDER BY cohort_month;
+
+-- Выводы:
+1. Оптимальный срок основного тарифа – 1 месяц. Он позволяет собрать платёж с максимального числа пользователей до того, как они потеряют интерес. 
+2. Дополнительно стоит внедрить годовой тариф со скидкой для удержания лояльной аудитории и пробный период на 7–14 дней для привлечения новых клиентов.
+
+
+--Задание 2
+
+SELECT 
+  ROUND(AVG(spending), 2) AS "Среднее списание коинов на пользователя",
+  ROUND(AVG(earnings), 2) AS "Среднее начисление коинов на пользователя",
+  ROUND(AVG(balance), 2) AS "Средний баланс коинов",
+  PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY balance) AS "Медианный баланс коинов"
+FROM (
+  SELECT 
+    u.id AS user_id,
+    COALESCE(SUM(CASE WHEN t.type_id IN (1,23,24,25,26,27,28,30) THEN t.value ELSE 0 END), 0) AS spending,
+    COALESCE(SUM(CASE WHEN t.type_id NOT IN (1,23,24,25,26,27,28,30) THEN t.value ELSE 0 END), 0) AS earnings,
+    COALESCE(
+      SUM(CASE WHEN t.type_id NOT IN (1,23,24,25,26,27,28,30) THEN t.value ELSE 0 END) 
+      - SUM(CASE WHEN t.type_id IN (1,23,24,25,26,27,28,30) THEN t.value ELSE 0 END), 
+      0
+    ) AS balance
+  FROM users u
+  LEFT JOIN transaction t ON u.id = t.user_id
+  GROUP BY u.id
+) AS user_transactions;
+
+-- Выводы:
+1. Медианный баланс (56) в 4,2 раза ниже среднего (238) – у половины пользователей почти нет запаса коинов. Это создаёт спрос на пополнение, значит, подписка с ежемесячным пакетом 50–70 коинов будет востребована у широкой аудитории.
+2. Среднее списание (27) намного меньше среднего начисления (265) – пользователи получают слишком много бесплатных коинов и не мотивированы тратить. Чтобы подписка стала нужной, сократите бесплатные раздачи или привяжите их к действиям, иначе платить за коины не будут
+
+-- Задание 3
+
+WITH user_stats AS (
+  SELECT 
+    u.id,
+    COUNT(DISTINCT cr.problem_id) AS solved,
+    COUNT(DISTINCT ts.test_id) AS tested,
+    COUNT(cr.id) AS runs,
+    COUNT(cs.id) AS submits
+  FROM users u
+  LEFT JOIN coderun cr ON u.id = cr.user_id
+  LEFT JOIN codesubmit cs ON u.id = cs.user_id
+  LEFT JOIN teststart ts ON u.id = ts.user_id
+  GROUP BY u.id
+),
+tx_stats AS (
+  SELECT 
+    COUNT(DISTINCT user_id) FILTER (WHERE type_id = 23) AS opened_tasks,
+    COUNT(DISTINCT user_id) FILTER (WHERE type_id = 24) AS opened_tests,
+    COUNT(DISTINCT user_id) FILTER (WHERE type_id = 25) AS opened_hints,
+    COUNT(DISTINCT user_id) FILTER (WHERE type_id = 26) AS opened_solutions,
+    COUNT(*) FILTER (WHERE type_id IN (23,24,25,26)) AS total_purchases,
+    COUNT(DISTINCT user_id) FILTER (WHERE type_id IN (23,24,25,26)) AS bought_any,
+    COUNT(DISTINCT user_id) AS any_tx
+  FROM transaction
+)
+SELECT 
+  ROUND(AVG(solved), 2) AS "Ср. задач решено на пользователя",
+  ROUND(AVG(tested), 2) AS "Ср. тестов пройдено на пользователя",
+  ROUND(COALESCE(SUM(runs)::numeric / NULLIF(SUM(solved), 0), 0), 2) AS "Ср. попыток на задачу",
+  ROUND(COALESCE(SUM(submits)::numeric / NULLIF(SUM(tested), 0), 0), 2) AS "Ср. попыток на тест",
+  ROUND(COUNT(CASE WHEN solved > 0 OR tested > 0 THEN 1 END) * 100.0 / COUNT(*), 2) AS "Доля активных пользователей, %",
+  tx_stats.opened_tasks AS "Пользователей открывали задачи за коины",
+  tx_stats.opened_tests AS "Пользователей открывали тесты за коины",
+  tx_stats.opened_hints AS "Пользователей открывали подсказки за коины",
+  tx_stats.opened_solutions AS "Пользователей открывали решения за коины",
+  tx_stats.total_purchases AS "Всего покупок за коины",
+  tx_stats.bought_any AS "Пользователей покупали что‑то за коины",
+  tx_stats.any_tx AS "Пользователей с транзакциями"
+FROM user_stats
+CROSS JOIN tx_stats
+GROUP BY 
+  tx_stats.opened_tasks,
+  tx_stats.opened_tests,
+  tx_stats.opened_hints,
+  tx_stats.opened_solutions,
+  tx_stats.total_purchases,
+  tx_stats.bought_any,
+  tx_stats.any_tx;
+
+--Выводы:
+1. Безлимитное открытие задач (или квота > среднего потребления, например, 10–20 задач в месяц).
+2. Безлимитные подсказки – сейчас их покупают, значит, ценят.
+3. Доступ к тестам – можно сделать ограниченное число бесплатных, а в подписке – безлимит.
+4. Эксклюзивные задачи и тесты – только для подписчиков (чтобы стимулировать переход).
+5. Обучающий контент – разборы решений, теория, чтобы сократить попытки и повысить успешность.
+5. Решения – можно оставить бесплатными, но добавить в подписку доступ к «правильным решениям с пояснениями» (если сейчас только код).
