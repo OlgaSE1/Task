@@ -1,0 +1,119 @@
+-- Дополнительное задание 2
+
+Для выгрузки данных используем SQL-запрос:
+
+SELECT
+  EXTRACT(ISODOW FROM entry_at) AS day_of_week,   -- 1..7
+  EXTRACT(HOUR FROM entry_at) AS hour_of_day,
+  COUNT(*) AS activity_count
+FROM userentry
+GROUP BY day_of_week, hour_of_day
+ORDER BY day_of_week, hour_of_day;
+
+Для загрузки данных, построения аналога графика (таблицы), применяем SQL-запрос, т.к. Python не изучался на курсе, и используем такой код:
+--Сводная таблица (тепловая карта) – активность по дням и часам
+SELECT
+  CASE EXTRACT(ISODOW FROM entry_at)
+    WHEN 1 THEN 'Пн'
+    WHEN 2 THEN 'Вт'
+    WHEN 3 THEN 'Ср'
+    WHEN 4 THEN 'Чт'
+    WHEN 5 THEN 'Пт'
+    WHEN 6 THEN 'Сб'
+    WHEN 7 THEN 'Вс'
+  END AS day_name,
+  COUNT(*) FILTER (WHERE EXTRACT(HOUR FROM entry_at) = 0)  AS h00,
+  COUNT(*) FILTER (WHERE EXTRACT(HOUR FROM entry_at) = 1)  AS h01,
+  COUNT(*) FILTER (WHERE EXTRACT(HOUR FROM entry_at) = 2)  AS h02,
+  COUNT(*) FILTER (WHERE EXTRACT(HOUR FROM entry_at) = 3)  AS h03,
+  COUNT(*) FILTER (WHERE EXTRACT(HOUR FROM entry_at) = 4)  AS h04,
+  COUNT(*) FILTER (WHERE EXTRACT(HOUR FROM entry_at) = 5)  AS h05,
+  COUNT(*) FILTER (WHERE EXTRACT(HOUR FROM entry_at) = 6)  AS h06,
+  COUNT(*) FILTER (WHERE EXTRACT(HOUR FROM entry_at) = 7)  AS h07,
+  COUNT(*) FILTER (WHERE EXTRACT(HOUR FROM entry_at) = 8)  AS h08,
+  COUNT(*) FILTER (WHERE EXTRACT(HOUR FROM entry_at) = 9)  AS h09,
+  COUNT(*) FILTER (WHERE EXTRACT(HOUR FROM entry_at) = 10) AS h10,
+  COUNT(*) FILTER (WHERE EXTRACT(HOUR FROM entry_at) = 11) AS h11,
+  COUNT(*) FILTER (WHERE EXTRACT(HOUR FROM entry_at) = 12) AS h12,
+  COUNT(*) FILTER (WHERE EXTRACT(HOUR FROM entry_at) = 13) AS h13,
+  COUNT(*) FILTER (WHERE EXTRACT(HOUR FROM entry_at) = 14) AS h14,
+  COUNT(*) FILTER (WHERE EXTRACT(HOUR FROM entry_at) = 15) AS h15,
+  COUNT(*) FILTER (WHERE EXTRACT(HOUR FROM entry_at) = 16) AS h16,
+  COUNT(*) FILTER (WHERE EXTRACT(HOUR FROM entry_at) = 17) AS h17,
+  COUNT(*) FILTER (WHERE EXTRACT(HOUR FROM entry_at) = 18) AS h18,
+  COUNT(*) FILTER (WHERE EXTRACT(HOUR FROM entry_at) = 19) AS h19,
+  COUNT(*) FILTER (WHERE EXTRACT(HOUR FROM entry_at) = 20) AS h20,
+  COUNT(*) FILTER (WHERE EXTRACT(HOUR FROM entry_at) = 21) AS h21,
+  COUNT(*) FILTER (WHERE EXTRACT(HOUR FROM entry_at) = 22) AS h22,
+  COUNT(*) FILTER (WHERE EXTRACT(HOUR FROM entry_at) = 23) AS h23
+FROM userentry
+GROUP BY day_name
+ORDER BY MIN(EXTRACT(ISODOW FROM entry_at));
+
+--Агрегированная статистика
+	--а) Суммарная активность по дням недели (для выбора лучшего дня релиза)
+SELECT
+  CASE EXTRACT(ISODOW FROM entry_at)
+    WHEN 1 THEN 'Пн'
+    WHEN 2 THEN 'Вт'
+    WHEN 3 THEN 'Ср'
+    WHEN 4 THEN 'Чт'
+    WHEN 5 THEN 'Пт'
+    WHEN 6 THEN 'Сб'
+    WHEN 7 THEN 'Вс'
+  END AS day_name,
+  COUNT(*) AS total_activity
+FROM userentry
+GROUP BY day_name
+ORDER BY MIN(EXTRACT(ISODOW FROM entry_at));
+	--б) Суммарная активность по часам (для выбора лучшего времени)
+SELECT
+  EXTRACT(HOUR FROM entry_at) AS hour_of_day,
+  COUNT(*) AS total_activity
+FROM userentry
+GROUP BY hour_of_day
+ORDER BY hour_of_day;
+	--в) День с наименьшей активностью (оптимальный для релиза)
+SELECT
+  CASE EXTRACT(ISODOW FROM entry_at)
+    WHEN 1 THEN 'Пн'
+    WHEN 2 THEN 'Вт'
+    WHEN 3 THEN 'Ср'
+    WHEN 4 THEN 'Чт'
+    WHEN 5 THEN 'Пт'
+    WHEN 6 THEN 'Сб'
+    WHEN 7 THEN 'Вс'
+  END AS day_name,
+  COUNT(*) AS total_activity
+FROM userentry
+GROUP BY day_name
+ORDER BY total_activity ASC
+LIMIT 1;
+	--г) Час с наименьшей активностью (оптимальное время суток)
+SELECT
+  EXTRACT(HOUR FROM entry_at) AS hour_of_day,
+  COUNT(*) AS total_activity
+FROM userentry
+GROUP BY hour_of_day
+ORDER BY total_activity ASC
+LIMIT 1;
+	--д) Часы пиковой активности (например, часы с активностью выше среднего)
+WITH hourly AS (
+  SELECT
+    EXTRACT(HOUR FROM entry_at) AS hour_of_day,
+    COUNT(*) AS cnt
+  FROM userentry
+  GROUP BY hour_of_day
+),
+avg_hour AS (
+  SELECT AVG(cnt) AS avg_cnt FROM hourly
+)
+SELECT
+  hour_of_day,
+  cnt,
+  ROUND(100.0 * cnt / (SELECT avg_cnt FROM avg_hour), 2) AS above_avg_pct
+FROM hourly
+WHERE cnt > (SELECT avg_cnt FROM avg_hour)
+ORDER BY cnt DESC;
+
+-- Выводы: Рекомендую проводить релизы в субботу в 1 час ночи, потому что в это время и день недели зафиксирована минимальная суммарная активность (на основе SQL-аналитики, Python не изучался на курсе)
